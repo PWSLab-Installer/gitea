@@ -1,22 +1,132 @@
 - hosts: localhost
   connection: local
-
+  vars:
+      
+      - version: 1.12.1
+      - mysql_databases: 
+        - name: gitea
+      - mysql_users: 
+        - name: gitea
+          password: gitea
 
   tasks:
       
-    - name: Install Role Gitea
-      local_action: command ansible-galaxy install -f thomas_maurice.ansible_role_gitea
+    - name: Install Git
+      apt:
+        name: git
+        state: present
+    
+    - name: Add the Git user
+      command: adduser --system --group --disabled-password --shell /bin/bash --home /home/git --gecos 'Git Version Control' git
 
     - name: Check if Gitea is already installed
       stat: path=/usr/local/bin/gitea
       register: gitea_exists
 
-    - name: Applying role Gitea
-      command: mv ~/.ansible/roles/thomas_maurice.ansible_role_gitea ~/.ansible/roles/pwslab.gitea
+    # - name: Download the latest repo
+    #   command: wget -O /tmp/gitea https://dl.gitea.io/gitea/{{ version }}/gitea-{{ version }}-linux-amd64
+
+    - name: Download the latest repo
+      get_url:
+        url: https://dl.gitea.io/gitea/{{ version }}/gitea-{{ version }}-linux-amd64
+        dest: /tmp/gitea
       when: not gitea_exists.stat.exists
+
+    - name: Process GITEA Repo
+      command: mv /tmp/gitea /usr/local/bin
+      when: not gitea_exists.stat.exists
+
+    - name: Give executable permissions to Gitea
+      file:
+        path: /usr/local/bin/gitea
+        mode: '0755'
+      when: not gitea_exists.stat.exists
+
+    - name: Give executable permissions to Gitea
+      file:
+        path: /var/lib/gitea/{{item}}
+        state: directory
+        owner: git
+        mode: '0750'
+      with_items:
+        - [custom,data,indexers,public,log]
+      when: not gitea_exists.stat.exists
+
+    - name: Gitea Process
+      file:
+        path: /etc/gitea
+        state: directory
+        owner: root
+        group: git
+        mode: '0770'
+      when: not gitea_exists.stat.exists
+      
+    
+    # - name: Granting permissions
+    #   command: wget https://raw.githubusercontent.com/go-gitea/gitea/master/contrib/systemd/gitea.service -P /etc/systemd/system/
+    
+    - name: Granting permissions
+      get_url:
+        url: https://raw.githubusercontent.com/go-gitea/gitea/master/contrib/systemd/gitea.service
+        dest: /etc/systemd/system/
+      when: not gitea_exists.stat.exists
+
+    - name: Enable service Gitea
+      service:
+        name: gitea
+        enabled: yes
+        state: started
+      when: not gitea_exists.stat.exists
+
+    - name: Port enabling
+      command: ufw allow 3000/tcp
+      when: not gitea_exists.stat.exists
+
+    - name: Install Role MySQL
+      local_action: command ansible-galaxy install -f geerlingguy.mysql
+
+    - name: Check if MYSQL is already installed
+      stat: path=/usr/bin/mysql
+      register: mysql_exists
+
+    - name: Applying role MYSQL
+      command: mv ~/.ansible/roles/geerlingguy.mysql ~/.ansible/roles/pwslab.mysql
+      when: not mysql_exists.stat.exists
       ignore_errors: yes
 
-    - name: Installing Gitea
+    - name: Check if version of Ubuntu
+      shell: |
+        lsb_release -d
+      register: ubuntu_os
+      ignore_errors: yes
+
+    - name: Applying replacement on 20.04
+      lineinfile:
+          dest: ~/.ansible/roles/pwslab.mysql/tasks/setup-Debian.yml
+          regexp: '^(.*){ mysql_python_package_debian }(.*)$'
+          line: '    name: python3-mysqldb'
+          state: present
+      when:
+        - ubuntu_os.stdout | regex_search("20.04")
+
+
+    - name: Installing MYSQL
       include_role:
-          name: pwslab.gitea
-      when: not gitea_exists.stat.exists
+          name: pwslab.mysql
+      when: not mysql_exists.stat.exists
+
+    - name: Applying role MYSQL
+      command: mysql --host=localhost --user=root  -e "GRANT ALL ON gitea.* TO 'gitea'@'localhost' IDENTIFIED BY 'gitea' WITH GRANT OPTION;"
+      when: 
+        - not mysql_exists.stat.exists
+        - ubuntu_os.stdout | regex_search("18.04")
+      ignore_errors: yes
+
+    - name: Applying role MYSQL
+      command: mysql --host=localhost --user=root -e "GRANT ALL ON gitea.* TO 'gitea'@'localhost'  WITH GRANT OPTION;"
+      when: 
+        - not mysql_exists.stat.exists
+        - ubuntu_os.stdout | regex_search("20.04")
+      ignore_errors: yes
+
+      
