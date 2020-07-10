@@ -1,0 +1,22 @@
+- hosts: localhost
+  connection: local
+
+
+  tasks:
+      
+    - name: Install Role Gitea
+      local_action: command ansible-galaxy install -f thomas_maurice.ansible_role_gitea
+
+    - name: Check if Gitea is already installed
+      stat: path=/usr/local/bin/gitea
+      register: gitea_exists
+
+    - name: Applying role Gitea
+      command: mv ~/.ansible/roles/thomas_maurice.ansible_role_gitea ~/.ansible/roles/pwslab.gitea
+      when: not gitea_exists.stat.exists
+      ignore_errors: yes
+
+    - name: Installing Gitea
+      include_role:
+          name: pwslab.gitea
+      when: not gitea_exists.stat.exists
